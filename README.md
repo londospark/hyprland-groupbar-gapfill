@@ -95,7 +95,8 @@ Gaps are read at load time and re-read on every config reload, so changing
 ## Caveats
 
 - The strip of tab that overdraws the gap is drawn outside the window box, so it
-  is not clickable. The clickable part of a tab is the part inside the window.
+  is not clickable. The clickable part of a tab is the part inside the window
+  ([#1](https://github.com/londospark/hyprland-groupbar-gapfill/issues/1)).
 - The plugin hooks an internal C++ method. It is version-locked by design and a
   future Hyprland refactor may need a source change, not just a rebuild.
 - Only the group bar is affected; title bars and other decorations are not.
