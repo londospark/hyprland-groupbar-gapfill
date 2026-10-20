@@ -1,0 +1,11 @@
+[repository]
+name = "hyprland-groupbar-gapfill"
+authors = ["Gareth Hubball (londospark)"]
+
+[groupbar-gapfill]
+description = "Group tab bars fill the layout gap above their window"
+authors = ["Gareth Hubball (londospark)"]
+output = "groupbar-gapfill.so"
+build = [
+    "make all",
+]
