@@ -3,19 +3,19 @@
  * above its window instead of leaving a strip of wallpaper between the tab and
  * the window above.
  *
- * How it works: the groupbar decoration tells the decoration positioner how
- * much space it wants reserved at the top of the window. That reserved height
- * moves the client surface down and anchors the tab at the tile top. We hook
- * CHyprGroupBarDecoration::getPositioningInfo() and shave the top reservation
- * by the layout gap, so the positioner starts the client surface that much
- * higher -- and the tab, which is anchored to the surface, with it. The tab
- * then overdraws the gap and its top edge lands on the window above.
+ * How it works: the group bar decoration reserves space at the top of the window
+ * for the tab strip, and the layout uses that reserved area to decide where the
+ * window box starts. We hook CWindow::getFullWindowReservedArea() and shave the
+ * top reservation by the layout gap (gaps_in top + bottom), so the layout places
+ * the window that much higher on its tile. The tab is positioned relative to the
+ * window box, so it moves up with it, overdraws the gap, and its top edge lands
+ * on the window above.
  *
- * The tab keeps its configured height and its title stays centred. Window
- * geometry is otherwise unchanged: the window grows by the gap at the top. The
- * decoration extents still cover the overdraw, so damage tracking is fine.
+ * The decoration itself is left alone: same declared height, same box, same
+ * input extents. That is why the whole tab stays clickable, including the part
+ * that reaches up into the gap.
  *
- * Windows at the top edge of the workspace are left alone, so the outer gap
+ * Windows at the top edge of the workspace are clamped, so the outer gap
  * (general:gaps_out) is preserved where there is no window to fill up to.
  */
 
@@ -26,18 +26,17 @@
 #include <string>
 #include <vector>
 
-#define private public
-#include <render/decorations/IHyprWindowDecoration.hpp>
-#undef private
-
 #include <desktop/view/Window.hpp>
 #include <event/EventBus.hpp>
+#include <layout/LayoutManager.hpp>
 #include <layout/target/Target.hpp>
 #include <output/Monitor.hpp>
 #include <render/decorations/DecorationPositioner.hpp>
+#include <render/decorations/IHyprWindowDecoration.hpp>
+#include <state/MonitorState.hpp>
 
-static HANDLE              PHANDLE                        = nullptr;
-static CFunctionHook*      g_pGetPositioningInfoHook       = nullptr;
+static HANDLE              PHANDLE           = nullptr;
+static CFunctionHook*      g_pReservedHook   = nullptr;
 static CHyprSignalListener g_configReloadedListener;
 
 /* How far the tab should reach up: the gap between two stacked windows. */
@@ -45,27 +44,34 @@ static double g_shaveWanted = 10.0;
 /* Keeps the outer gap at the top edge of the workspace intact. */
 static double g_gapsOutTop = 10.0;
 
-using origGetPositioningInfo = SDecorationPositioningInfo (*)(void*);
+using origGetFullWindowReservedArea = SBoxExtents (*)(void*);
 
-static origGetPositioningInfo g_pOrigGetPositioningInfo = nullptr;
+static origGetFullWindowReservedArea g_pOrigGetFullWindowReservedArea = nullptr;
 
-/* How far this particular groupbar may reach up without eating gaps_out. */
-static double shaveFor(void* self) {
-    auto* const DECO = rc<IHyprWindowDecoration*>(self);
+/* The reserved area is only consulted on a layout pass. */
+static void recalcAllMonitors() {
+    for (const auto& MON : State::monitorState()->monitors()) {
+        if (MON)
+            g_layoutManager->recalculateMonitor(MON);
+    }
+}
 
-    if (!DECO)
-        return g_shaveWanted;
+/* How far this particular window may reach up without eating gaps_out. */
+static double shaveFor(Desktop::View::CWindow* window) {
+    if (!window)
+        return 0.0;
 
-    const auto WINDOW = DECO->m_window.lock();
+    const auto DECO = window->getDecorationByType(DECORATION_GROUPBAR);
 
-    if (!WINDOW)
-        return g_shaveWanted;
+    /* No tab bar, or a tab bar that is currently hidden: nothing to fill. */
+    if (!DECO || DECO->getPositioningInfo().desiredExtents.topLeft.y <= 0.0)
+        return 0.0;
 
-    const auto TARGET = WINDOW->layoutTarget();
-    const auto MON    = WINDOW->m_monitor.lock();
+    const auto TARGET = window->layoutTarget();
+    const auto MON    = window->m_monitor.lock();
 
     if (!TARGET || !MON)
-        return g_shaveWanted;
+        return 0.0;
 
     const double LIMIT = MON->logicalBoxMinusReserved().y + g_gapsOutTop;
     const double TOP   = TARGET->position().y;
@@ -73,15 +79,15 @@ static double shaveFor(void* self) {
     return std::clamp(TOP - LIMIT, 0.0, g_shaveWanted);
 }
 
-static SDecorationPositioningInfo hkGetPositioningInfo(void* self) {
-    SDecorationPositioningInfo info = g_pOrigGetPositioningInfo(self);
+static SBoxExtents hkGetFullWindowReservedArea(void* self) {
+    SBoxExtents extents = g_pOrigGetFullWindowReservedArea(self);
 
-    if (info.desiredExtents.topLeft.y <= 0.0)
-        return info;
+    if (extents.topLeft.y <= 0.0)
+        return extents;
 
-    info.desiredExtents.topLeft.y = std::max(0.0, info.desiredExtents.topLeft.y - shaveFor(self));
+    extents.topLeft.y = std::max(0.0, extents.topLeft.y - shaveFor(rc<Desktop::View::CWindow*>(self)));
 
-    return info;
+    return extents;
 }
 
 /* Parse the four values out of e.g. "css gap data: 5 5 5 5". */
@@ -125,32 +131,46 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
 
     refreshGaps();
-    g_configReloadedListener = Event::bus()->m_events.config.reloaded.listen([] { refreshGaps(); });
+    g_configReloadedListener = Event::bus()->m_events.config.reloaded.listen([] {
+        const double OLDGAP  = g_shaveWanted;
+        const double OLDOUT  = g_gapsOutTop;
 
-    const auto MATCHES = HyprlandAPI::findFunctionsByName(PHANDLE, "getPositioningInfo");
+        refreshGaps();
+
+        if (OLDGAP != g_shaveWanted || OLDOUT != g_gapsOutTop)
+            recalcAllMonitors();
+    });
+
+    const auto MATCHES = HyprlandAPI::findFunctionsByName(PHANDLE, "getFullWindowReservedArea");
 
     for (const auto& m : MATCHES) {
-        if (!m.demangled.starts_with("CHyprGroupBarDecoration::getPositioningInfo"))
+        if (!m.demangled.ends_with("CWindow::getFullWindowReservedArea()"))
             continue;
 
-        g_pGetPositioningInfoHook = HyprlandAPI::createFunctionHook(PHANDLE, m.address, (void*)&hkGetPositioningInfo);
+        g_pReservedHook = HyprlandAPI::createFunctionHook(PHANDLE, m.address, (void*)&hkGetFullWindowReservedArea);
         break;
     }
 
-    if (!g_pGetPositioningInfoHook || !g_pGetPositioningInfoHook->hook())
-        return {"groupbar-gapfill", "FAILED to hook CHyprGroupBarDecoration::getPositioningInfo", "Gareth Hubball (londospark)", "0.3"};
+    if (!g_pReservedHook || !g_pReservedHook->hook())
+        return {"groupbar-gapfill", "FAILED to hook CWindow::getFullWindowReservedArea", "Gareth Hubball (londospark)", "0.4"};
 
-    g_pOrigGetPositioningInfo = rc<origGetPositioningInfo>(g_pGetPositioningInfoHook->m_original);
+    g_pOrigGetFullWindowReservedArea = rc<origGetFullWindowReservedArea>(g_pReservedHook->m_original);
 
-    return {"groupbar-gapfill", "Group tab bars overdraw the layout gap above their window", "Gareth Hubball (londospark)", "0.3"};
+    /* Windows only move on a layout pass, so ask for one now. */
+    recalcAllMonitors();
+
+    return {"groupbar-gapfill", "Group tab bars overdraw the layout gap above their window", "Gareth Hubball (londospark)", "0.4"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
     g_configReloadedListener.reset();
 
-    if (g_pGetPositioningInfoHook)
-        HyprlandAPI::removeFunctionHook(PHANDLE, g_pGetPositioningInfoHook);
+    if (g_pReservedHook)
+        HyprlandAPI::removeFunctionHook(PHANDLE, g_pReservedHook);
 
-    g_pGetPositioningInfoHook = nullptr;
-    g_pOrigGetPositioningInfo = nullptr;
+    g_pReservedHook                  = nullptr;
+    g_pOrigGetFullWindowReservedArea = nullptr;
+
+    /* Put the windows back where they were. */
+    recalcAllMonitors();
 }

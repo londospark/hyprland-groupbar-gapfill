@@ -74,29 +74,28 @@ hyprctl plugin unload ~/.local/lib/hyprland/groupbar-gapfill.so
 
 ## How it works
 
-The group bar decoration asks Hyprland's decoration positioner to reserve space
-at the top of the window for the tab strip. That reservation pushes the client
-surface down and anchors the tab at the tile top.
+The group bar decoration reserves space at the top of its window for the tab
+strip, and Hyprland's layout uses that reservation to decide where the window box
+starts on the tile.
 
-The plugin hooks `CHyprGroupBarDecoration::getPositioningInfo()` and shaves the
-top reservation by `gaps_in` (top + bottom) for any window that is not at the
-top edge of its monitor. The positioner then starts the client surface that much
-higher, and the tab, which is anchored to the surface, moves up with it — its
-top edge lands on the window above. The decoration extents still cover the
-overdrawn strip, so damage tracking stays correct and nothing is left behind.
+The plugin hooks `CWindow::getFullWindowReservedArea()` and shaves the reserved
+top by `gaps_in` (top + bottom) for any window that is not at the top edge of its
+monitor. The layout then places the window that much higher on the tile. The tab
+is positioned relative to the window box, so it moves up with it and its top edge
+lands on the window above.
 
-The window is clamped to the workspace edge using the monitor's reserved area
-plus `gaps_out` (top), which is why the outer gap survives at the top of a
-workspace.
+Only the layout input changes. The decoration keeps its declared height, its box
+and its input extents, so the tab stays the configured height, stays centred, and
+stays clickable right across the part that reaches into the gap.
 
-Gaps are read at load time and re-read on every config reload, so changing
-`gaps_in`/`gaps_out` takes effect immediately; no plugin reload needed.
+Windows are clamped to the workspace edge using the monitor's reserved area plus
+`gaps_out` (top), which is why the outer gap survives at the top of a workspace.
+
+Gaps are read at load time and re-read on every config reload; if they changed,
+the layout is recalculated, so no plugin reload is needed.
 
 ## Caveats
 
-- The strip of tab that overdraws the gap is drawn outside the window box, so it
-  is not clickable. The clickable part of a tab is the part inside the window
-  ([#1](https://github.com/londospark/hyprland-groupbar-gapfill/issues/1)).
 - The plugin hooks an internal C++ method. It is version-locked by design and a
   future Hyprland refactor may need a source change, not just a rebuild.
 - Only the group bar is affected; title bars and other decorations are not.
