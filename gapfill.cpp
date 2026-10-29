@@ -26,7 +26,8 @@
 #include <string>
 #include <vector>
 
-#include <desktop/view/Window.hpp>
+#include <desktop/view/window/Window.hpp>
+#include <desktop/view/window/WindowPresentation.hpp>
 #include <event/EventBus.hpp>
 #include <layout/LayoutManager.hpp>
 #include <layout/target/Target.hpp>
@@ -61,7 +62,7 @@ static double shaveFor(Desktop::View::CWindow* window) {
     if (!window)
         return 0.0;
 
-    const auto DECO = window->getDecorationByType(DECORATION_GROUPBAR);
+    const auto DECO = window->presentation().decoration(DECORATION_GROUPBAR);
 
     /* No tab bar, or a tab bar that is currently hidden: nothing to fill. */
     if (!DECO || DECO->getPositioningInfo().desiredExtents.topLeft.y <= 0.0)
@@ -152,14 +153,14 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     }
 
     if (!g_pReservedHook || !g_pReservedHook->hook())
-        return {"groupbar-gapfill", "FAILED to hook CWindow::getFullWindowReservedArea", "Gareth Hubball (londospark)", "0.4"};
+        return {"groupbar-gapfill", "FAILED to hook CWindow::getFullWindowReservedArea", "Gareth Hubball (londospark)", "0.5"};
 
     g_pOrigGetFullWindowReservedArea = rc<origGetFullWindowReservedArea>(g_pReservedHook->m_original);
 
     /* Windows only move on a layout pass, so ask for one now. */
     recalcAllMonitors();
 
-    return {"groupbar-gapfill", "Group tab bars overdraw the layout gap above their window", "Gareth Hubball (londospark)", "0.4"};
+    return {"groupbar-gapfill", "Group tab bars overdraw the layout gap above their window", "Gareth Hubball (londospark)", "0.5"};
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {

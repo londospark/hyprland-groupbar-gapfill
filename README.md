@@ -22,7 +22,7 @@ working.
 
 ## Requirements
 
-Hyprland 0.56.x (tested with 0.56.2) with headers available to `pkg-config`
+Hyprland 0.57.x (tested with 0.57.0) with headers available to `pkg-config`
 (`hyprland.pc`, shipped by the Hyprland package on Arch).
 
 Hyprland's plugin ABI is locked to the exact build, so a plugin built for one
