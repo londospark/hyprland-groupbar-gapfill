@@ -100,6 +100,23 @@ the layout is recalculated, so no plugin reload is needed.
   future Hyprland refactor may need a source change, not just a rebuild.
 - Only the group bar is affected; title bars and other decorations are not.
 
+## Releases
+
+Releases are named after the Hyprland version they build and were tested
+against, not after the plugin's own changes: the current release is
+`v0.57.0` because it targets Hyprland 0.57.0. The tag points at the commit
+that is known to work with that Hyprland release, so anyone on a given
+Hyprland version can check out a matching plugin without guessing.
+
+```sh
+git tag -a v0.57.0 -m "Built against Hyprland 0.57.0"   # or: make tag
+git push origin v0.57.0
+```
+
+`make tag` derives the name from `pkg-config --modversion hyprland`. If more
+than one plugin release ever targets the same Hyprland version, suffix the
+later ones (`v0.57.0-2`, `v0.57.0-3`).
+
 ## Uninstall
 
 Remove the load line from your config and delete
